@@ -35,16 +35,15 @@ jobs:
 
     - name: Prime Buildozer (download SDK/NDK once)
       run: |
-        # اجرا می‌کنیم تا فولدر SDK ساخته شود (اگر fail شد ایرادی ندارد)
         buildozer android debug || true
 
-    - name: Install stable Android SDK packages and accept licenses
+    - name: Install stable Android SDK + accept licenses
       shell: bash
       run: |
         set -e
         SDK="$HOME/.buildozer/android/platform/android-sdk"
 
-        # اطمینان از وجود sdkmanager
+        # ensure sdkmanager exists at .../cmdline-tools/latest/bin
         if [ ! -x "$SDK/cmdline-tools/latest/bin/sdkmanager" ]; then
           ALT=$(find "$SDK/cmdline-tools" -maxdepth 1 -type d -name "[0-9]*" | head -n1 || true)
           if [ -n "$ALT" ]; then
@@ -58,18 +57,16 @@ jobs:
         TOOLS="$SDK/cmdline-tools/latest/bin"
 
         yes | "$TOOLS/sdkmanager" --licenses || true
+        "$TOOLS/sdkmanager" "platform-tools" "platforms;android-31" "build-tools;${ANDROID_BUILD_TOOLS_VERSION}" "cmdline-tools;latest" || true
 
-        # نصب نسخه‌های پایدار موردنیاز
-        "$TOOLS/sdkmanager" \
-          "platform-tools" \
-          "platforms;android-31" \
-          "build-tools;${ANDROID_BUILD_TOOLS_VERSION}" \
-          "cmdline-tools;latest" \
-          || true
+        # (اختیاری) اگر Buildozer باز هم دنبال 36.1.0-rc1 رفت، یک symlink از 34.0.0 بساز:
+        BT="$SDK/build-tools"
+        if [ -d "$BT/34.0.0" ] && [ ! -d "$BT/36.1.0-rc1" ]; then
+          ln -s "$BT/34.0.0" "$BT/36.1.0-rc1"
+        fi
 
-        echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-        "$TOOLS/sdkmanager" --list | head -n 50 || true
         ls -la "$SDK/build-tools" || true
+        "$TOOLS/sdkmanager" --list | head -n 50 || true
 
     - name: Build APK (use stable build-tools)
       env:
@@ -79,7 +76,6 @@ jobs:
         NDKAPI: "21"
         ANDROID_BUILD_TOOLS_VERSION: "34.0.0"
       run: |
-        # حالا بیلد نهایی
         buildozer -v android debug
 
     - name: Upload APK artifact
