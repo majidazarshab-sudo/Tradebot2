@@ -9,6 +9,11 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    env:
+      ANDROIDAPI: "31"
+      NDKAPI: "21"
+      ANDROID_BUILD_TOOLS_VERSION: "34.0.0"
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -28,25 +33,18 @@ jobs:
         python -m pip install --upgrade pip wheel
         pip install "cython<3.0" buildozer==1.5.0
 
-    - name: Show versions
+    - name: Prime Buildozer (download SDK/NDK once)
       run: |
-        java -version || true
-        python --version
-        buildozer --version
-
-    # ---- Build with stable SDK/NDK toolchains and accepted licenses ----
-    - name: Build APK (debug)
-      env:
-        ANDROIDAPI: "31"
-        NDKAPI: "21"
-      run: |
-        # 1) first run to let buildozer fetch SDK/NDK (ignore failure)
+        # اجرا می‌کنیم تا فولدر SDK ساخته شود (اگر fail شد ایرادی ندارد)
         buildozer android debug || true
 
-        # 2) locate Android SDK that buildozer downloaded
+    - name: Install stable Android SDK packages and accept licenses
+      shell: bash
+      run: |
+        set -e
         SDK="$HOME/.buildozer/android/platform/android-sdk"
 
-        # 3) ensure cmdline-tools/latest exists to get sdkmanager
+        # اطمینان از وجود sdkmanager
         if [ ! -x "$SDK/cmdline-tools/latest/bin/sdkmanager" ]; then
           ALT=$(find "$SDK/cmdline-tools" -maxdepth 1 -type d -name "[0-9]*" | head -n1 || true)
           if [ -n "$ALT" ]; then
@@ -55,13 +53,33 @@ jobs:
           fi
         fi
 
+        export ANDROID_SDK_ROOT="$SDK"
+        export ANDROID_HOME="$SDK"
         TOOLS="$SDK/cmdline-tools/latest/bin"
 
-        # 4) accept licenses and install stable packages
         yes | "$TOOLS/sdkmanager" --licenses || true
-        "$TOOLS/sdkmanager" "platforms;android-31" "build-tools;34.0.0" || true
 
-        # 5) final build (verbose)
+        # نصب نسخه‌های پایدار موردنیاز
+        "$TOOLS/sdkmanager" \
+          "platform-tools" \
+          "platforms;android-31" \
+          "build-tools;${ANDROID_BUILD_TOOLS_VERSION}" \
+          "cmdline-tools;latest" \
+          || true
+
+        echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+        "$TOOLS/sdkmanager" --list | head -n 50 || true
+        ls -la "$SDK/build-tools" || true
+
+    - name: Build APK (use stable build-tools)
+      env:
+        ANDROID_SDK_ROOT: ${{ env.HOME }}/.buildozer/android/platform/android-sdk
+        ANDROID_HOME: ${{ env.HOME }}/.buildozer/android/platform/android-sdk
+        ANDROIDAPI: "31"
+        NDKAPI: "21"
+        ANDROID_BUILD_TOOLS_VERSION: "34.0.0"
+      run: |
+        # حالا بیلد نهایی
         buildozer -v android debug
 
     - name: Upload APK artifact
