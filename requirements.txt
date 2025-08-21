@@ -1,0 +1,3 @@
+kivy
+telethon
+requests
