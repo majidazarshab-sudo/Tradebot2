@@ -88,11 +88,18 @@ jobs:
         echo "===== tail buildozer_full.log ====="
         (tail -n 300 buildozer_full.log || echo "log file not found")
 
-    - name: Upload artifacts (APK + logs)
+    - name: List bin contents
+      if: always()
+      run: |
+        echo "===== BIN CONTENTS ====="
+        (ls -R bin || echo "bin not found")
+
+    - name: Upload artifacts (APK + logs + whole bin)
       if: always()
       uses: actions/upload-artifact@v4
       with:
         name: tradebot-artifacts
         path: |
-          bin/**/*.apk
+          bin/**/*
           buildozer_full.log
+        if-no-files-found: warn
