@@ -1,34 +1,34 @@
 name: Build APK (Docker)
 
 on:
-  push:
-    branches: [ "main" ]
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    container:
-      image: kivy/buildozer:latest
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-      - name: Show tree
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
         run: |
-          pwd
-          ls -la
+          sudo apt update
+          sudo apt install -y zip unzip openjdk-17-jdk python3-pip
+          pip install --upgrade pip
+          pip install buildozer cython virtualenv
 
       - name: Build APK
-        env:
-          ANDROIDAPI: "31"
-          NDKAPI: "21"
         run: |
-          buildozer -v android debug
+          cd $GITHUB_WORKSPACE
+          buildozer android debug
 
       - name: Upload APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         with:
           name: tradebot-apk
           path: bin/*.apk
