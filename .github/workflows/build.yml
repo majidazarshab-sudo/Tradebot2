@@ -1,4 +1,4 @@
-name: Build APK (native – force stable build-tools)
+name: Build APK (native – ubuntu22 fix)
 
 on:
   push:
@@ -7,7 +7,8 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # ← مهم: از 22.04 استفاده می‌کنیم نه 24.04
+    runs-on: ubuntu-22.04
 
     env:
       ANDROIDAPI: "31"
@@ -28,29 +29,25 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y \
           python3-pip python3-setuptools git zip unzip openjdk-17-jdk \
-          libffi-dev libssl-dev zlib1g-dev libncurses6 libstdc++6 \
-          automake autoconf libtool pkg-config curl
-        python -m pip install --upgrade pip wheel
-        pip install "cython<3.0" buildozer==1.5.0
+          libffi-dev libssl-dev zlib1g-dev libncurses5 libstdc++6 \
+          automake autoconf libtool libtool-bin pkg-config gettext gawk curl
+        python -m pip install --upgrade "pip<24.1"
+        python -m pip install --upgrade "setuptools<70" "wheel<0.43" "virtualenv<20.26" "cython<3.0" buildozer==1.5.0
 
     - name: Prime Buildozer (create SDK dirs)
       run: |
-        # یک بار اجرا تا فولدرهای buildozer ساخته شود (ممکن است fail شود، مهم نیست)
         buildozer android debug || true
 
-    # === نصب دستی cmdline-tools و سپس نصب پکیج‌های پایدار با sdkmanager ===
     - name: Install Google cmdline-tools + stable SDK packages
       shell: bash
       run: |
         set -e
         SDK="$HOME/.buildozer/android/platform/android-sdk"
         mkdir -p "$SDK/cmdline-tools"
-        # دانلود مستقیم cmdline-tools از گوگل و نصب در latest/
         CT_ZIP="$HOME/cmdline-tools.zip"
         curl -L -o "$CT_ZIP" https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
         mkdir -p "$SDK/cmdline-tools/latest"
         unzip -qo "$CT_ZIP" -d "$HOME/ctmp"
-        # محتویات پوشه tools را به latest کپی کن
         cp -r "$HOME/ctmp/cmdline-tools/"* "$SDK/cmdline-tools/latest/"
 
         export ANDROID_SDK_ROOT="$SDK"
@@ -58,25 +55,21 @@ jobs:
         TOOLS="$SDK/cmdline-tools/latest/bin"
 
         yes | "$TOOLS/sdkmanager" --licenses || true
-        "$TOOLS/sdkmanager" \
-          "platform-tools" \
-          "platforms;android-31" \
-          "build-tools;${ANDROID_BUILD_TOOLS_VERSION}" \
-          || true
+        "$TOOLS/sdkmanager" "platform-tools" "platforms;android-31" "build-tools;${ANDROID_BUILD_TOOLS_VERSION}" || true
 
-        echo "== Installed build-tools =="
-        ls -la "$SDK/build-tools" || true
-
-        # اگر هنوز Buildozer بدنبال rc رفت، لینک بده به 34.0.0
-        if [ -d "$SDK/build-tools/34.0.0" ] && [ ! -d "$SDK/build-tools/36.1.0-rc1" ]; then
-          ln -s "$SDK/build-tools/34.0.0" "$SDK/build-tools/36.1.0-rc1"
+        BT="$SDK/build-tools"
+        # پاک rc ها و لینک احتیاطی
+        if [ -d "$BT" ]; then
+          find "$BT" -maxdepth 1 -type d -name "rc" -print -exec rm -rf {} \; || true
+        fi
+        if [ -d "$BT/34.0.0" ] && [ ! -d "$BT/36.1.0-rc1" ]; then
+          ln -s "$BT/34.0.0" "$BT/36.1.0-rc1"
         fi
 
-        echo "== PATH sanity =="
-        echo "$PATH"
         "$SDK/build-tools/34.0.0/aidl" --version || true
+        ls -la "$BT" || true
 
-    - name: Build APK (force stable build-tools)
+    - name: Build APK (verbose + save logs)
       env:
         ANDROID_SDK_ROOT: ${{ env.HOME }}/.buildozer/android/platform/android-sdk
         ANDROID_HOME: ${{ env.HOME }}/.buildozer/android/platform/android-sdk
@@ -84,12 +77,22 @@ jobs:
         NDKAPI: "21"
         ANDROID_BUILD_TOOLS_VERSION: "34.0.0"
       run: |
-        # اطمینان از در دسترس بودن ابزارهای build-tools 34.0.0
         export PATH="$ANDROID_SDK_ROOT/build-tools/34.0.0:$PATH"
-        buildozer -v android debug
+        buildozer android clean || true
+        buildozer -v android debug 2>&1 | tee buildozer_full.log
+      continue-on-error: true
 
-    - name: Upload APK artifact
+    - name: Show last 300 lines of build log
+      if: always()
+      run: |
+        echo "===== tail buildozer_full.log ====="
+        (tail -n 300 buildozer_full.log || echo "log file not found")
+
+    - name: Upload artifacts (APK + logs)
+      if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: tradebot-apk
-        path: bin/*.apk
+        name: tradebot-artifacts
+        path: |
+          bin//*.apk
+          buildozer_full.log
