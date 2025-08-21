@@ -34,11 +34,34 @@ jobs:
         python --version
         buildozer --version
 
+    # ---- Build with stable SDK/NDK toolchains and accepted licenses ----
     - name: Build APK (debug)
       env:
         ANDROIDAPI: "31"
         NDKAPI: "21"
       run: |
+        # 1) first run to let buildozer fetch SDK/NDK (ignore failure)
+        buildozer android debug || true
+
+        # 2) locate Android SDK that buildozer downloaded
+        SDK="$HOME/.buildozer/android/platform/android-sdk"
+
+        # 3) ensure cmdline-tools/latest exists to get sdkmanager
+        if [ ! -x "$SDK/cmdline-tools/latest/bin/sdkmanager" ]; then
+          ALT=$(find "$SDK/cmdline-tools" -maxdepth 1 -type d -name "[0-9]*" | head -n1 || true)
+          if [ -n "$ALT" ]; then
+            mkdir -p "$SDK/cmdline-tools/latest"
+            cp -r "$ALT/." "$SDK/cmdline-tools/latest/"
+          fi
+        fi
+
+        TOOLS="$SDK/cmdline-tools/latest/bin"
+
+        # 4) accept licenses and install stable packages
+        yes | "$TOOLS/sdkmanager" --licenses || true
+        "$TOOLS/sdkmanager" "platforms;android-31" "build-tools;34.0.0" || true
+
+        # 5) final build (verbose)
         buildozer -v android debug
 
     - name: Upload APK artifact
