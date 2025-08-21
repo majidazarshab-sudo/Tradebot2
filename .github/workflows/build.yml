@@ -29,58 +29,52 @@ jobs:
         sudo apt-get install -y \
           python3-pip python3-setuptools git zip unzip openjdk-17-jdk \
           libffi-dev libssl-dev zlib1g-dev libncurses6 libstdc++6 \
-          automake autoconf libtool pkg-config
+          automake autoconf libtool pkg-config curl
         python -m pip install --upgrade pip wheel
         pip install "cython<3.0" buildozer==1.5.0
 
-    # یک بار اجرا تا SDK/NDK دایرکتوری‌ها ساخته شوند (اگر fail شد مهم نیست)
-    - name: Prime Buildozer (fetch SDK/NDK dirs)
+    - name: Prime Buildozer (create SDK dirs)
       run: |
+        # یک بار اجرا تا فولدرهای buildozer ساخته شود (ممکن است fail شود، مهم نیست)
         buildozer android debug || true
 
-    - name: Install stable SDK & purge rc build-tools
+    # === نصب دستی cmdline-tools و سپس نصب پکیج‌های پایدار با sdkmanager ===
+    - name: Install Google cmdline-tools + stable SDK packages
       shell: bash
       run: |
         set -e
         SDK="$HOME/.buildozer/android/platform/android-sdk"
-
-        # ensure sdkmanager is available
-        if [ ! -x "$SDK/cmdline-tools/latest/bin/sdkmanager" ]; then
-          ALT=$(find "$SDK/cmdline-tools" -maxdepth 1 -type d -name "[0-9]*" | head -n1 || true)
-          if [ -n "$ALT" ]; then
-            mkdir -p "$SDK/cmdline-tools/latest"
-            cp -r "$ALT/." "$SDK/cmdline-tools/latest/"
-          fi
-        fi
+        mkdir -p "$SDK/cmdline-tools"
+        # دانلود مستقیم cmdline-tools از گوگل و نصب در latest/
+        CT_ZIP="$HOME/cmdline-tools.zip"
+        curl -L -o "$CT_ZIP" https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+        mkdir -p "$SDK/cmdline-tools/latest"
+        unzip -qo "$CT_ZIP" -d "$HOME/ctmp"
+        # محتویات پوشه tools را به latest کپی کن
+        cp -r "$HOME/ctmp/cmdline-tools/"* "$SDK/cmdline-tools/latest/"
 
         export ANDROID_SDK_ROOT="$SDK"
         export ANDROID_HOME="$SDK"
         TOOLS="$SDK/cmdline-tools/latest/bin"
 
         yes | "$TOOLS/sdkmanager" --licenses || true
-
-        # نصب پکیج‌های پایدار
         "$TOOLS/sdkmanager" \
           "platform-tools" \
           "platforms;android-31" \
           "build-tools;${ANDROID_BUILD_TOOLS_VERSION}" \
-          "cmdline-tools;latest" || true
-
-        # پاک کردن هر build-tools با rc (پریویو) که باعث ارجاع اشتباه می‌شود
-        BT="$SDK/build-tools"
-        if [ -d "$BT" ]; then
-          find "$BT" -maxdepth 1 -type d -name "rc" -print -exec rm -rf {} \; || true
-        fi
-
-        # اگر buildozer هنوز اصرار به 36.1.0-rc1 داشت، به 34.0.0 لینک بده
-        if [ -d "$BT/34.0.0" ] && [ ! -d "$BT/36.1.0-rc1" ]; then
-          ln -s "$BT/34.0.0" "$BT/36.1.0-rc1"
-        fi
+          || true
 
         echo "== Installed build-tools =="
-        ls -la "$BT" || true
-        echo "== sdkmanager list (head) =="
-        "$TOOLS/sdkmanager" --list | head -n 80 || true
+        ls -la "$SDK/build-tools" || true
+
+        # اگر هنوز Buildozer بدنبال rc رفت، لینک بده به 34.0.0
+        if [ -d "$SDK/build-tools/34.0.0" ] && [ ! -d "$SDK/build-tools/36.1.0-rc1" ]; then
+          ln -s "$SDK/build-tools/34.0.0" "$SDK/build-tools/36.1.0-rc1"
+        fi
+
+        echo "== PATH sanity =="
+        echo "$PATH"
+        "$SDK/build-tools/34.0.0/aidl" --version || true
 
     - name: Build APK (force stable build-tools)
       env:
@@ -90,7 +84,7 @@ jobs:
         NDKAPI: "21"
         ANDROID_BUILD_TOOLS_VERSION: "34.0.0"
       run: |
-        # برای اطمینان، پوشه build-tools/34.0.0 را در PATH می‌گذاریم
+        # اطمینان از در دسترس بودن ابزارهای build-tools 34.0.0
         export PATH="$ANDROID_SDK_ROOT/build-tools/34.0.0:$PATH"
         buildozer -v android debug
 
