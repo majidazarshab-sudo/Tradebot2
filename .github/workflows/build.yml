@@ -1,4 +1,4 @@
-name: Build APK (native – ubuntu22 fix)
+name: Build APK (native – ubuntu22 strict)
 
 on:
   push:
@@ -7,8 +7,7 @@ on:
 
 jobs:
   build:
-    # ← مهم: از 22.04 استفاده می‌کنیم نه 24.04
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-22.04   # ← مهم
 
     env:
       ANDROIDAPI: "31"
@@ -38,14 +37,15 @@ jobs:
       run: |
         buildozer android debug || true
 
-    - name: Install Google cmdline-tools + stable SDK packages
+    - name: Install cmdline-tools + stable SDK (STRICT)
       shell: bash
       run: |
-        set -e
+        set -euxo pipefail
         SDK="$HOME/.buildozer/android/platform/android-sdk"
         mkdir -p "$SDK/cmdline-tools"
         CT_ZIP="$HOME/cmdline-tools.zip"
         curl -L -o "$CT_ZIP" https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+        rm -rf "$SDK/cmdline-tools/latest"
         mkdir -p "$SDK/cmdline-tools/latest"
         unzip -qo "$CT_ZIP" -d "$HOME/ctmp"
         cp -r "$HOME/ctmp/cmdline-tools/"* "$SDK/cmdline-tools/latest/"
@@ -54,22 +54,22 @@ jobs:
         export ANDROID_HOME="$SDK"
         TOOLS="$SDK/cmdline-tools/latest/bin"
 
-        yes | "$TOOLS/sdkmanager" --licenses || true
-        "$TOOLS/sdkmanager" "platform-tools" "platforms;android-31" "build-tools;${ANDROID_BUILD_TOOLS_VERSION}" || true
+        yes | "$TOOLS/sdkmanager" --licenses
+        "$TOOLS/sdkmanager" --sdk_root="$SDK" --install "platform-tools" "platforms;android-31" "build-tools;${ANDROID_BUILD_TOOLS_VERSION}"
 
+        # حذف هر build-tools با rc و لینک احتیاطی
         BT="$SDK/build-tools"
-        # پاک rc ها و لینک احتیاطی
-        if [ -d "$BT" ]; then
-          find "$BT" -maxdepth 1 -type d -name "rc" -print -exec rm -rf {} \; || true
-        fi
+        ls -la "$BT" || true
+        find "$BT" -maxdepth 1 -type d -name "rc" -print -exec rm -rf {} \; || true
         if [ -d "$BT/34.0.0" ] && [ ! -d "$BT/36.1.0-rc1" ]; then
           ln -s "$BT/34.0.0" "$BT/36.1.0-rc1"
         fi
 
+        # تأیید وجود ابزارهای لازم
+        test -x "$SDK/build-tools/34.0.0/aidl"
         "$SDK/build-tools/34.0.0/aidl" --version || true
-        ls -la "$BT" || true
 
-    - name: Build APK (verbose + save logs)
+    - name: Build APK (verbose)
       env:
         ANDROID_SDK_ROOT: ${{ env.HOME }}/.buildozer/android/platform/android-sdk
         ANDROID_HOME: ${{ env.HOME }}/.buildozer/android/platform/android-sdk
@@ -77,22 +77,23 @@ jobs:
         NDKAPI: "21"
         ANDROID_BUILD_TOOLS_VERSION: "34.0.0"
       run: |
+        set -euxo pipefail
         export PATH="$ANDROID_SDK_ROOT/build-tools/34.0.0:$PATH"
         buildozer android clean || true
         buildozer -v android debug 2>&1 | tee buildozer_full.log
-      continue-on-error: true
 
-    - name: Show last 300 lines of build log
+    - name: List BIN contents
       if: always()
       run: |
-        echo "===== tail buildozer_full.log ====="
-        (tail -n 300 buildozer_full.log || echo "log file not found")
+        echo "===== BIN ====="
+        (ls -R bin || echo "bin/ not found")
 
-    - name: Upload artifacts (APK + logs)
+    - name: Upload artifacts (APK + logs + bin)
       if: always()
       uses: actions/upload-artifact@v4
       with:
         name: tradebot-artifacts
         path: |
-          bin//*.apk
+          bin//*
           buildozer_full.log
+        if-no-files-found: warn
